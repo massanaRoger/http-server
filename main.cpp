@@ -8,9 +8,16 @@
 #include <sys/_types/_socklen_t.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <cstddef>
+#include <pthread.h>
 
-int main() {
-	struct addrinfo hints, *res, *p;
+struct ServerData {
+	struct addrinfo *data;
+	int socket;
+};
+ServerData start_server() {
+	ServerData res;
+	struct addrinfo hints, *p;
 	int status;
 	char ipstr[INET6_ADDRSTRLEN];
 
@@ -19,12 +26,12 @@ int main() {
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
 
-	if ((status = getaddrinfo("127.0.0.1", "6969", &hints, &res)) != 0) {
+	if ((status = getaddrinfo("127.0.0.1", "6969", &hints, &res.data)) != 0) {
 		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
 		exit(1);
 	}
 
-	for(p = res; p != NULL; p = p->ai_next) {
+	for(p = res.data; p != NULL; p = p->ai_next) {
 		void *addr;
 		const char *ipver;
 
@@ -44,53 +51,97 @@ int main() {
 
 	printf("Creating socket... \n");
 
-	int serverSockfd = socket(PF_INET, SOCK_STREAM, 0);
+	res.socket = socket(PF_INET, SOCK_STREAM, 0);
 
-	if (serverSockfd == -1) {
+	if (res.socket == -1) {
 		fprintf(stderr, "Socket creation error\n");
 		exit(1);
 	}
 
-	int boundError = bind(serverSockfd, res->ai_addr, res->ai_addrlen);
+	int boundError = bind(res.socket, res.data->ai_addr, res.data->ai_addrlen);
 
 	if (boundError == -1) {
 		fprintf(stderr, "File bind error\n");
 		exit(1);
 	}
 
-	int listErr = listen(serverSockfd, 10);
+	int listErr = listen(res.socket, 10);
 
 	if (listErr == -1) {
 		fprintf(stderr, "Server error listening");
 		exit(1);
 	}
 
-	sockaddr clientSockAddr;
-	socklen_t clientSize = sizeof (struct sockaddr_storage);
-	int clientSock = accept(serverSockfd, &clientSockAddr, &clientSize);
+	return res;
+}
 
-	if (clientSock == -1) {
-		fprintf(stderr, "Error connecting to client");
-		exit(1);
-	} else {
-		printf("Client connected successfully\n");
-	}
+void* handle_request(void* ptr) {
+	int clientSock = *(int*)ptr;
+	free(ptr);
 
-	 const char *response =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 13\r\n"
-            "\r\n"
-            "Hello, World!";
+	printf("ClientSock: %d\n", clientSock);
+	fflush(stdout);
 
-	size_t size = send(clientSock, response, strlen(response), 0);
+	const char *response =
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Type: text/plain\r\n"
+		"Content-Length: 13\r\n"
+		"\r\n"
+		"Hello, World!";
+
+	int size = send(clientSock, response, strlen(response), 0);
 
 	if (size == -1) {
 		fprintf(stderr, "Error sending data\n");
+		shutdown(clientSock, 0);
 		exit(1);
 	}
 
-	freeaddrinfo(res);
+	shutdown(clientSock, 0);
+	return NULL;
+}
+
+void start_listening(int serverSockfd) {
+	sockaddr clientSockAddr;
+	socklen_t clientSize = sizeof (struct sockaddr_storage);
+
+	while (true) {
+		int clientSock = accept(serverSockfd, &clientSockAddr, &clientSize);
+		if (clientSock < 0) {
+			fprintf(stderr, "Error in accepty \n");
+			continue;
+		}
+		int* clientSockPtr = (int*) malloc(sizeof(int));
+
+		if (clientSockPtr == NULL) {
+			fprintf(stderr, "Could not assign memory \n");
+			exit(1);
+		}
+		*clientSockPtr = clientSock;
+
+		pthread_t thread;
+		if (pthread_create(&thread, NULL, handle_request, (void*)clientSockPtr) != 0) {
+			fprintf(stderr, "Error creating thread\n");
+			free(clientSockPtr);
+			shutdown(clientSock, 0);
+			continue;
+		}
+
+		if (pthread_detach(thread) != 0) {
+			fprintf(stderr, "Error detaching thread \n");
+			free(clientSockPtr);
+			shutdown(clientSock, 0);
+			exit(1);
+		}
+	}
+}
+
+int main() {
+	ServerData serverData = start_server();
+
+	start_listening(serverData.socket);
+
+	freeaddrinfo(serverData.data);
 
 	return 0;
 }
