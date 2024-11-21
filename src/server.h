@@ -30,28 +30,13 @@ public:
 		}
 	};
 
-	static HttpServer& getInstance() {
-		static HttpServer instance;
-		return instance;
-	}
+	static HttpServer& getInstance();
 
-	void registerRoute(Method method, const std::string& path, Handler handler) {
-		RequestKey req = { path, method };
-		m_Routes[req] = handler;
-	}
+	void registerRoute(Method method, const std::string& path, Handler handler);
+	void registerRoute(Method method, std::string&& path, Handler handler);
 
-	void registerRoute(Method method, std::string&& path, Handler handler) {
-		RequestKey req = { std::move(path), method };
-		m_Routes[req] = handler;
-	}
-
-	void addRequest(const RequestKey& requestKey) {
-		m_RequestQueue.push(requestKey);
-	}
-
-	void addRequest(RequestKey&& requestKey) {
-		m_RequestQueue.push(std::move(requestKey));
-	}
+	void addRequest(const RequestKey& requestKey);
+	void addRequest(RequestKey&& requestKey);
 
 private:
 	HttpServer() = default;
@@ -64,9 +49,7 @@ private:
 
 class RouteRegistrar {
 public:
-	RouteRegistrar(const Method method, const std::string& path, HttpServer::Handler handler) {
-		HttpServer::getInstance().registerRoute(method, std::move(path), std::move(handler));
-	}
+	RouteRegistrar(const Method method, const std::string& path, HttpServer::Handler handler);
 };
 
 #define CONCAT_IMPL( x, y ) x##y
